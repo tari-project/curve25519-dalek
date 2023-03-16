@@ -24,6 +24,7 @@ use window::{NafLookupTable5, NafLookupTable8};
 use prelude::*;
 
 
+#[derive(Clone)]
 pub struct VartimePrecomputedStraus {
     static_lookup_tables: Vec<NafLookupTable8<CachedPoint>>,
 }
@@ -73,7 +74,7 @@ impl VartimePrecomputedMultiscalarMul for VartimePrecomputedStraus {
 
         let sp = self.static_lookup_tables.len();
         let dp = dynamic_lookup_tables.len();
-        assert_eq!(sp, static_nafs.len());
+        assert!(sp >= static_nafs.len());
         assert_eq!(dp, dynamic_nafs.len());
 
         // We could save some doublings by looking for the highest
@@ -92,7 +93,7 @@ impl VartimePrecomputedMultiscalarMul for VartimePrecomputedStraus {
                 }
             }
 
-            for i in 0..sp {
+            for i in 0..static_nafs.len() {
                 let t_ij = static_nafs[i][j];
                 if t_ij > 0 {
                     R = &R + &self.static_lookup_tables[i].select(t_ij as usize);

@@ -58,12 +58,20 @@ jobs:
     - uses: dtolnay/rust-toolchain@nightly
     - run: cargo test --features "nightly"
 
-  msrv:
-    name: Current MSRV is 1.41
+  build-stable:
+    name: Build (stable)
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: dtolnay/rust-toolchain@1.41
+    - uses: dtolnay/rust-toolchain@stable
+    - run: cargo build
+
+  build-nightly:
+    name: Build (nightly)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: dtolnay/rust-toolchain@nightly
     - run: cargo build
 
   bench:
