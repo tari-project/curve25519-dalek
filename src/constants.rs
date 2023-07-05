@@ -16,8 +16,8 @@
 //! scope using a `let` binding:
 //!
 //! ```
-//! use curve25519_dalek::constants;
-//! use curve25519_dalek::traits::IsIdentity;
+//! use tari_curve25519_dalek::constants;
+//! use tari_curve25519_dalek::traits::IsIdentity;
 //!
 //! let B = &constants::RISTRETTO_BASEPOINT_TABLE;
 //! let l = &constants::BASEPOINT_ORDER;
