@@ -19,13 +19,13 @@ use core::cmp::Ordering;
 use crate::backend::serial::curve_models::{
     AffineNielsPoint, CompletedPoint, ProjectiveNielsPoint, ProjectivePoint,
 };
+
 use crate::edwards::EdwardsPoint;
 use crate::scalar::Scalar;
 use crate::traits::Identity;
 use crate::traits::VartimePrecomputedMultiscalarMul;
 use crate::window::{NafLookupTable5, NafLookupTable8};
 
-#[allow(missing_docs)]
 #[derive(Clone)]
 pub struct VartimePrecomputedStraus {
     static_lookup_tables: Vec<NafLookupTable8<AffineNielsPoint>>,
@@ -98,6 +98,7 @@ impl VartimePrecomputedMultiscalarMul for VartimePrecomputedStraus {
                     Ordering::Equal => {}
                 }
             }
+
 
             #[allow(clippy::needless_range_loop)]
             for i in 0..static_nafs.len() {
