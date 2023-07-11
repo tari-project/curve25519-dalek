@@ -388,6 +388,7 @@ impl<'de> Deserialize<'de> for RistrettoPoint {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut bytes = [0u8; 32];
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..32 {
                     bytes[i] = seq
                         .next_element()?
@@ -423,6 +424,7 @@ impl<'de> Deserialize<'de> for CompressedRistretto {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut bytes = [0u8; 32];
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..32 {
                     bytes[i] = seq
                         .next_element()?
@@ -981,6 +983,7 @@ impl VartimeMultiscalarMul for RistrettoPoint {
 // decouple stability of the inner type from the stability of the
 // outer type.
 #[cfg(feature = "alloc")]
+#[derive(Clone)]
 pub struct VartimeRistrettoPrecomputation(crate::backend::VartimePrecomputedStraus);
 
 #[cfg(feature = "alloc")]
@@ -1270,7 +1273,7 @@ mod test {
         let bp_compressed_ristretto = constants::RISTRETTO_BASEPOINT_POINT.compress();
         let bp_recaf = bp_compressed_ristretto.decompress().unwrap().0;
         // Check that bp_recaf differs from bp by a point of order 4
-        let diff = &constants::RISTRETTO_BASEPOINT_POINT.0 - bp_recaf;
+        let diff = constants::RISTRETTO_BASEPOINT_POINT.0 - bp_recaf;
         let diff4 = diff.mul_by_pow_2(2);
         assert_eq!(diff4.compress(), CompressedEdwardsY::identity());
     }
@@ -1681,7 +1684,7 @@ mod test {
         ];
         // Check that onewaymap(input) == output for all the above vectors
         for (input, output) in test_vectors {
-            let Q = RistrettoPoint::from_uniform_bytes(&input);
+            let Q = RistrettoPoint::from_uniform_bytes(input);
             assert_eq!(&Q.compress(), output);
         }
     }
@@ -1760,5 +1763,79 @@ mod test {
 
         assert_eq!(P.compress(), R.compress());
         assert_eq!(Q.compress(), R.compress());
+    }
+
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn partial_precomputed_multiscalar() {
+        let mut rng = rand::thread_rng();
+
+        let n_static = 16;
+        let n_dynamic = 8;
+
+        let static_points = (0..n_static)
+            .map(|_| RistrettoPoint::random(&mut rng))
+            .collect::<Vec<_>>();
+
+        // Use one fewer scalars
+        let static_scalars = (0..n_static - 1)
+            .map(|_| Scalar::random(&mut rng))
+            .collect::<Vec<_>>();
+
+        let dynamic_points = (0..n_dynamic)
+            .map(|_| RistrettoPoint::random(&mut rng))
+            .collect::<Vec<_>>();
+
+        let dynamic_scalars = (0..n_dynamic)
+            .map(|_| Scalar::random(&mut rng))
+            .collect::<Vec<_>>();
+
+        // Compute the linear combination using precomputed multiscalar multiplication
+        let precomputation = VartimeRistrettoPrecomputation::new(static_points.iter());
+        let result_multiscalar = precomputation.vartime_mixed_multiscalar_mul(
+            &static_scalars,
+            &dynamic_scalars,
+            &dynamic_points,
+        );
+
+        // Compute the linear combination manually
+        let mut result_manual = RistrettoPoint::identity();
+        for i in 0..static_scalars.len() {
+            result_manual += static_points[i] * static_scalars[i];
+        }
+        for i in 0..n_dynamic {
+            result_manual += dynamic_points[i] * dynamic_scalars[i];
+        }
+
+        assert_eq!(result_multiscalar, result_manual);
+    }
+
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn full_precomputed_multiscalar() {
+        let mut rng = rand::thread_rng();
+
+        let n_static = 16;
+
+        let static_points = (0..n_static)
+            .map(|_| RistrettoPoint::random(&mut rng))
+            .collect::<Vec<_>>();
+
+        // Use one fewer scalars
+        let static_scalars = (0..n_static - 1)
+            .map(|_| Scalar::random(&mut rng))
+            .collect::<Vec<_>>();
+
+        // Compute the linear combination using precomputed multiscalar multiplication
+        let precomputation = VartimeRistrettoPrecomputation::new(static_points.iter());
+        let result_multiscalar = precomputation.vartime_multiscalar_mul(&static_scalars);
+
+        // Compute the linear combination manually
+        let mut result_manual = RistrettoPoint::identity();
+        for i in 0..static_scalars.len() {
+            result_manual += static_points[i] * static_scalars[i];
+        }
+
+        assert_eq!(result_multiscalar, result_manual);
     }
 }

@@ -436,13 +436,14 @@ impl<'de> Deserialize<'de> for Scalar {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut bytes = [0u8; 32];
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..32 {
                     bytes[i] = seq
                         .next_element()?
                         .ok_or_else(|| serde::de::Error::invalid_length(i, &"expected 32 bytes"))?;
                 }
                 Option::from(Scalar::from_canonical_bytes(bytes))
-                    .ok_or_else(|| serde::de::Error::custom(&"scalar was not canonically encoded"))
+                    .ok_or_else(|| serde::de::Error::custom("scalar was not canonically encoded"))
             }
         }
 
