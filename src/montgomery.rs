@@ -49,24 +49,28 @@
 // affine and projective cakes and eat both of them too.
 #![allow(non_snake_case)]
 
-use core::ops::{Mul, MulAssign};
+use core::{
+    hash::{Hash, Hasher},
+    ops::{Mul, MulAssign},
+};
 
-use constants::{APLUS2_OVER_FOUR, MONTGOMERY_A, MONTGOMERY_A_NEG};
-use edwards::{CompressedEdwardsY, EdwardsPoint};
-use field::FieldElement;
-use scalar::Scalar;
+use crate::constants::{APLUS2_OVER_FOUR, MONTGOMERY_A, MONTGOMERY_A_NEG};
+use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
+use crate::field::FieldElement;
+use crate::scalar::{clamp_integer, Scalar};
 
-use traits::Identity;
+use crate::traits::Identity;
 
 use subtle::Choice;
 use subtle::ConstantTimeEq;
 use subtle::{ConditionallyNegatable, ConditionallySelectable};
 
+#[cfg(feature = "zeroize")]
 use zeroize::Zeroize;
 
 /// Holds the \\(u\\)-coordinate of a point on the Montgomery form of
 /// Curve25519 or its twist.
-#[derive(Copy, Clone, Debug, Hash)]
+#[derive(Copy, Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MontgomeryPoint(pub [u8; 32]);
 
@@ -80,19 +84,24 @@ impl ConstantTimeEq for MontgomeryPoint {
     }
 }
 
-impl Default for MontgomeryPoint {
-    fn default() -> MontgomeryPoint {
-        MontgomeryPoint([0u8; 32])
-    }
-}
-
 impl PartialEq for MontgomeryPoint {
     fn eq(&self, other: &MontgomeryPoint) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1u8
+        self.ct_eq(other).into()
     }
 }
 
 impl Eq for MontgomeryPoint {}
+
+// Equal MontgomeryPoints must hash to the same value. So we have to get them into a canonical
+// encoding first
+impl Hash for MontgomeryPoint {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Do a round trip through a `FieldElement`. `as_bytes` is guaranteed to give a canonical
+        // 32-byte encoding
+        let canonical_bytes = FieldElement::from_bytes(&self.0).as_bytes();
+        canonical_bytes.hash(state);
+    }
+}
 
 impl Identity for MontgomeryPoint {
     /// Return the group identity element, which has order 4.
@@ -101,6 +110,7 @@ impl Identity for MontgomeryPoint {
     }
 }
 
+#[cfg(feature = "zeroize")]
 impl Zeroize for MontgomeryPoint {
     fn zeroize(&mut self) {
         self.0.zeroize();
@@ -108,13 +118,46 @@ impl Zeroize for MontgomeryPoint {
 }
 
 impl MontgomeryPoint {
+    /// Fixed-base scalar multiplication (i.e. multiplication by the base point).
+    pub fn mul_base(scalar: &Scalar) -> Self {
+        EdwardsPoint::mul_base(scalar).to_montgomery()
+    }
+
+    /// Multiply this point by `clamp_integer(bytes)`. For a description of clamping, see
+    /// [`clamp_integer`].
+    pub fn mul_clamped(self, bytes: [u8; 32]) -> Self {
+        // We have to construct a Scalar that is not reduced mod l, which breaks scalar invariant
+        // #2. But #2 is not necessary for correctness of variable-base multiplication. All that
+        // needs to hold is invariant #1, i.e., the scalar is less than 2^255. This is guaranteed
+        // by clamping.
+        // Further, we don't do any reduction or arithmetic with this clamped value, so there's no
+        // issues arising from the fact that the curve point is not necessarily in the prime-order
+        // subgroup.
+        let s = Scalar {
+            bytes: clamp_integer(bytes),
+        };
+        s * self
+    }
+
+    /// Multiply the basepoint by `clamp_integer(bytes)`. For a description of clamping, see
+    /// [`clamp_integer`].
+    pub fn mul_base_clamped(bytes: [u8; 32]) -> Self {
+        // See reasoning in Self::mul_clamped why it is OK to make an unreduced Scalar here. We
+        // note that fixed-base multiplication is also defined for all values of `bytes` less than
+        // 2^255.
+        let s = Scalar {
+            bytes: clamp_integer(bytes),
+        };
+        Self::mul_base(&s)
+    }
+
     /// View this `MontgomeryPoint` as an array of bytes.
-    pub fn as_bytes<'a>(&'a self) -> &'a [u8; 32] {
+    pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
     /// Convert this `MontgomeryPoint` to an array of bytes.
-    pub fn to_bytes(&self) -> [u8; 32] {
+    pub const fn to_bytes(&self) -> [u8; 32] {
         self.0
     }
 
@@ -151,13 +194,15 @@ impl MontgomeryPoint {
 
         let u = FieldElement::from_bytes(&self.0);
 
-        if u == FieldElement::minus_one() { return None; }
+        if u == FieldElement::MINUS_ONE {
+            return None;
+        }
 
-        let one = FieldElement::one();
+        let one = FieldElement::ONE;
 
         let y = &(&u - &one) * &(&u + &one).invert();
 
-        let mut y_bytes = y.to_bytes();
+        let mut y_bytes = y.as_bytes();
         y_bytes[31] ^= sign << 7;
 
         CompressedEdwardsY(y_bytes).decompress()
@@ -172,7 +217,7 @@ impl MontgomeryPoint {
 //      draft gets into a more polished/accepted state.
 #[allow(unused)]
 pub(crate) fn elligator_encode(r_0: &FieldElement) -> MontgomeryPoint {
-    let one = FieldElement::one();
+    let one = FieldElement::ONE;
     let d_1 = &one + &r_0.square2(); /* 2r^2 */
 
     let d = &MONTGOMERY_A_NEG * &(d_1.invert()); /* A/(1+2r^2) */
@@ -185,12 +230,12 @@ pub(crate) fn elligator_encode(r_0: &FieldElement) -> MontgomeryPoint {
 
     let (eps_is_sq, _eps) = FieldElement::sqrt_ratio_i(&eps, &one);
 
-    let zero = FieldElement::zero();
+    let zero = FieldElement::ZERO;
     let Atemp = FieldElement::conditional_select(&MONTGOMERY_A, &zero, eps_is_sq); /* 0, or A if nonsquare*/
     let mut u = &d + &Atemp; /* d, or d+A if nonsquare */
     u.conditional_negate(!eps_is_sq); /* d, or -d-A if nonsquare */
 
-    MontgomeryPoint(u.to_bytes())
+    MontgomeryPoint(u.as_bytes())
 }
 
 /// A `ProjectivePoint` holds a point on the projective line
@@ -205,8 +250,8 @@ struct ProjectivePoint {
 impl Identity for ProjectivePoint {
     fn identity() -> ProjectivePoint {
         ProjectivePoint {
-            U: FieldElement::one(),
-            W: FieldElement::zero(),
+            U: FieldElement::ONE,
+            W: FieldElement::ZERO,
         }
     }
 }
@@ -237,9 +282,9 @@ impl ProjectivePoint {
     ///
     /// * \\( u = U / W \\) if \\( W \neq 0 \\);
     /// * \\( 0 \\) if \\( W \eq 0 \\);
-    pub fn to_affine(&self) -> MontgomeryPoint {
+    pub fn as_affine(&self) -> MontgomeryPoint {
         let u = &self.U * &self.W.invert();
-        MontgomeryPoint(u.to_bytes())
+        MontgomeryPoint(u.as_bytes())
     }
 }
 
@@ -251,12 +296,13 @@ impl ProjectivePoint {
 /// and the affine difference
 /// \\(      u\_{P-Q} = u(P-Q) \\), set
 /// $$
-///     (U\_P : W\_P) \gets u([2]P)
+///     (U\_P : W\_P) \gets u(\[2\]P)
 /// $$
 /// and
 /// $$
 ///     (U\_Q : W\_Q) \gets u(P + Q).
 /// $$
+#[rustfmt::skip] // keep alignment of explanatory comments
 fn differential_add_and_double(
     P: &mut ProjectivePoint,
     Q: &mut ProjectivePoint,
@@ -299,36 +345,54 @@ fn differential_add_and_double(
 
 define_mul_assign_variants!(LHS = MontgomeryPoint, RHS = Scalar);
 
-define_mul_variants!(LHS = MontgomeryPoint, RHS = Scalar, Output = MontgomeryPoint);
-define_mul_variants!(LHS = Scalar, RHS = MontgomeryPoint, Output = MontgomeryPoint);
+define_mul_variants!(
+    LHS = MontgomeryPoint,
+    RHS = Scalar,
+    Output = MontgomeryPoint
+);
+define_mul_variants!(
+    LHS = Scalar,
+    RHS = MontgomeryPoint,
+    Output = MontgomeryPoint
+);
 
 /// Multiply this `MontgomeryPoint` by a `Scalar`.
 impl<'a, 'b> Mul<&'b Scalar> for &'a MontgomeryPoint {
     type Output = MontgomeryPoint;
 
-    /// Given `self` \\( = u\_0(P) \\), and a `Scalar` \\(n\\), return \\( u\_0([n]P) \\).
+    /// Given `self` \\( = u\_0(P) \\), and a `Scalar` \\(n\\), return \\( u\_0(\[n\]P) \\).
     fn mul(self, scalar: &'b Scalar) -> MontgomeryPoint {
         // Algorithm 8 of Costello-Smith 2017
         let affine_u = FieldElement::from_bytes(&self.0);
         let mut x0 = ProjectivePoint::identity();
         let mut x1 = ProjectivePoint {
             U: affine_u,
-            W: FieldElement::one(),
+            W: FieldElement::ONE,
         };
 
-        let bits: [i8; 256] = scalar.bits();
+        // NOTE: The below swap-double-add routine skips the first iteration, i.e., it assumes the
+        // MSB of `scalar` is 0. This is allowed, since it follows from Scalar invariant #1.
 
-        for i in (0..255).rev() {
-            let choice: u8 = (bits[i + 1] ^ bits[i]) as u8;
+        // Go through the bits from most to least significant, using a sliding window of 2
+        let mut bits = scalar.bits_le().rev();
+        let mut prev_bit = bits.next().unwrap();
+        for cur_bit in bits {
+            let choice: u8 = (prev_bit ^ cur_bit) as u8;
 
             debug_assert!(choice == 0 || choice == 1);
 
             ProjectivePoint::conditional_swap(&mut x0, &mut x1, choice.into());
             differential_add_and_double(&mut x0, &mut x1, &affine_u);
-        }
-        ProjectivePoint::conditional_swap(&mut x0, &mut x1, Choice::from(bits[0] as u8));
 
-        x0.to_affine()
+            prev_bit = cur_bit;
+        }
+        // The final value of prev_bit above is scalar.bits()[0], i.e., the LSB of scalar
+        ProjectivePoint::conditional_swap(&mut x0, &mut x1, Choice::from(prev_bit as u8));
+        // Don't leave the bit in the stack
+        #[cfg(feature = "zeroize")]
+        prev_bit.zeroize();
+
+        x0.as_affine()
     }
 }
 
@@ -353,15 +417,17 @@ impl<'a, 'b> Mul<&'b MontgomeryPoint> for &'a Scalar {
 #[cfg(test)]
 mod test {
     use super::*;
-    use constants;
-    use core::convert::TryInto;
+    use crate::constants;
 
-    use rand_core::OsRng;
+    #[cfg(feature = "alloc")]
+    use alloc::vec::Vec;
+
+    use rand_core::RngCore;
 
     #[test]
     fn identity_in_different_coordinates() {
         let id_projective = ProjectivePoint::identity();
-        let id_montgomery = id_projective.to_affine();
+        let id_montgomery = id_projective.as_affine();
 
         assert!(id_montgomery == MontgomeryPoint::identity());
     }
@@ -397,7 +463,7 @@ mod test {
         );
         // sign bit = 1 => minus basepoint
         assert_eq!(
-            - constants::ED25519_BASEPOINT_POINT,
+            -constants::ED25519_BASEPOINT_POINT,
             constants::X25519_BASEPOINT.to_edwards(1).unwrap()
         );
     }
@@ -414,24 +480,25 @@ mod test {
     /// Check that Montgomery -> Edwards fails for points on the twist.
     #[test]
     fn montgomery_to_edwards_rejects_twist() {
-        let one = FieldElement::one();
+        let one = FieldElement::ONE;
 
         // u = 2 corresponds to a point on the twist.
-        let two = MontgomeryPoint((&one+&one).to_bytes());
+        let two = MontgomeryPoint((&one + &one).as_bytes());
 
         assert!(two.to_edwards(0).is_none());
 
         // u = -1 corresponds to a point on the twist, but should be
         // checked explicitly because it's an exceptional point for the
         // birational map.  For instance, libsignal will accept it.
-        let minus_one = MontgomeryPoint((-&one).to_bytes());
+        let minus_one = MontgomeryPoint((-&one).as_bytes());
 
         assert!(minus_one.to_edwards(0).is_none());
     }
 
     #[test]
     fn eq_defined_mod_p() {
-        let mut u18_bytes = [0u8; 32]; u18_bytes[0] = 18;
+        let mut u18_bytes = [0u8; 32];
+        u18_bytes[0] = 18;
         let u18 = MontgomeryPoint(u18_bytes);
         let u18_unred = MontgomeryPoint([255; 32]);
 
@@ -440,18 +507,46 @@ mod test {
 
     #[test]
     fn montgomery_ladder_matches_edwards_scalarmult() {
-        let mut csprng: OsRng = OsRng;
+        let mut csprng = rand_core::OsRng;
 
-        let s: Scalar = Scalar::random(&mut csprng);
-        let p_edwards: EdwardsPoint = &constants::ED25519_BASEPOINT_TABLE * &s;
-        let p_montgomery: MontgomeryPoint = p_edwards.to_montgomery();
+        for _ in 0..100 {
+            let s: Scalar = Scalar::random(&mut csprng);
+            let p_edwards = EdwardsPoint::mul_base(&s);
+            let p_montgomery: MontgomeryPoint = p_edwards.to_montgomery();
 
-        let expected = s * p_edwards;
-        let result = s * p_montgomery;
+            let expected = s * p_edwards;
+            let result = s * p_montgomery;
 
-        assert_eq!(result, expected.to_montgomery())
+            assert_eq!(result, expected.to_montgomery())
+        }
     }
 
+    /// Check that mul_base_clamped and mul_clamped agree
+    #[test]
+    fn mul_base_clamped() {
+        let mut csprng = rand_core::OsRng;
+
+        // Test agreement on a large integer. Even after clamping, this is not reduced mod l.
+        let a_bytes = [0xff; 32];
+        assert_eq!(
+            MontgomeryPoint::mul_base_clamped(a_bytes),
+            constants::X25519_BASEPOINT.mul_clamped(a_bytes)
+        );
+
+        // Test agreement on random integers
+        for _ in 0..100 {
+            // This will be reduced mod l with probability l / 2^256 ≈ 6.25%
+            let mut a_bytes = [0u8; 32];
+            csprng.fill_bytes(&mut a_bytes);
+
+            assert_eq!(
+                MontgomeryPoint::mul_base_clamped(a_bytes),
+                constants::X25519_BASEPOINT.mul_clamped(a_bytes)
+            );
+        }
+    }
+
+    #[cfg(feature = "alloc")]
     const ELLIGATOR_CORRECT_OUTPUT: [u8; 32] = [
         0x5f, 0x35, 0x20, 0x00, 0x1c, 0x6c, 0x99, 0x36, 0xa3, 0x12, 0x06, 0xaf, 0xe7, 0xc7, 0xac,
         0x22, 0x4e, 0x88, 0x61, 0x61, 0x9b, 0xf9, 0x88, 0x72, 0x44, 0x49, 0x15, 0x89, 0x9d, 0x95,
@@ -459,9 +554,9 @@ mod test {
     ];
 
     #[test]
-    #[cfg(feature = "std")] // Vec
+    #[cfg(feature = "alloc")]
     fn montgomery_elligator_correct() {
-        let bytes: std::vec::Vec<u8> = (0u8..32u8).collect();
+        let bytes: Vec<u8> = (0u8..32u8).collect();
         let bits_in: [u8; 32] = (&bytes[..]).try_into().expect("Range invariant broken");
 
         let fe = FieldElement::from_bytes(&bits_in);

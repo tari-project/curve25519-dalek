@@ -17,7 +17,7 @@ use core::borrow::Borrow;
 
 use subtle;
 
-use scalar::Scalar;
+use crate::scalar::{clamp_integer, Scalar};
 
 // ------------------------------------------------------------------------
 // Public Traits
@@ -44,7 +44,7 @@ where
     T: subtle::ConstantTimeEq + Identity,
 {
     fn is_identity(&self) -> bool {
-        self.ct_eq(&T::identity()).unwrap_u8() == 1u8
+        self.ct_eq(&T::identity()).into()
     }
 }
 
@@ -60,7 +60,19 @@ pub trait BasepointTable {
     fn basepoint(&self) -> Self::Point;
 
     /// Multiply a `scalar` by this precomputed basepoint table, in constant time.
-    fn basepoint_mul(&self, scalar: &Scalar) -> Self::Point;
+    fn mul_base(&self, scalar: &Scalar) -> Self::Point;
+
+    /// Multiply `clamp_integer(bytes)` by this precomputed basepoint table, in constant time. For
+    /// a description of clamping, see [`clamp_integer`].
+    fn mul_base_clamped(&self, bytes: [u8; 32]) -> Self::Point {
+        // Basepoint multiplication is defined for all values of `bytes` up to and including
+        // 2^255 - 1. The limit comes from the fact that scalar.as_radix_16() doesn't work for
+        // most scalars larger than 2^255.
+        let s = Scalar {
+            bytes: clamp_integer(bytes),
+        };
+        self.mul_base(&s)
+    }
 }
 
 /// A trait for constant-time multiscalar multiplication without precomputation.
@@ -84,6 +96,8 @@ pub trait MultiscalarMul {
     /// iterators returning either `Scalar`s or `&Scalar`s.
     ///
     /// ```
+    /// # #[cfg(feature = "alloc")]
+    /// # {
     /// use curve25519_dalek::constants;
     /// use curve25519_dalek::traits::MultiscalarMul;
     /// use curve25519_dalek::ristretto::RistrettoPoint;
@@ -110,6 +124,7 @@ pub trait MultiscalarMul {
     /// // Note: minus_abc.into_iter(): Iterator<Item=Scalar>
     ///
     /// assert_eq!(A1.compress(), (-A2).compress());
+    /// # }
     /// ```
     fn multiscalar_mul<I, J>(scalars: I, points: J) -> Self::Point
     where
@@ -136,6 +151,8 @@ pub trait VartimeMultiscalarMul {
     /// inlining point decompression into the multiscalar call,
     /// avoiding the need for temporary buffers.
     /// ```
+    /// #[cfg(feature = "alloc")]
+    /// # {
     /// use curve25519_dalek::constants;
     /// use curve25519_dalek::traits::VartimeMultiscalarMul;
     /// use curve25519_dalek::ristretto::RistrettoPoint;
@@ -175,6 +192,7 @@ pub trait VartimeMultiscalarMul {
     /// );
     ///
     /// assert_eq!(A3, Some(A1+A1));
+    /// # }
     /// ```
     fn optional_multiscalar_mul<I, J>(scalars: I, points: J) -> Option<Self::Point>
     where
@@ -199,6 +217,8 @@ pub trait VartimeMultiscalarMul {
     /// iterators returning either `Scalar`s or `&Scalar`s.
     ///
     /// ```
+    /// #[cfg(feature = "alloc")]
+    /// # {
     /// use curve25519_dalek::constants;
     /// use curve25519_dalek::traits::VartimeMultiscalarMul;
     /// use curve25519_dalek::ristretto::RistrettoPoint;
@@ -225,6 +245,7 @@ pub trait VartimeMultiscalarMul {
     /// // Note: minus_abc.into_iter(): Iterator<Item=Scalar>
     ///
     /// assert_eq!(A1.compress(), (-A2).compress());
+    /// # }
     /// ```
     fn vartime_multiscalar_mul<I, J>(scalars: I, points: J) -> Self::Point
     where
@@ -254,15 +275,15 @@ pub trait VartimeMultiscalarMul {
 ///
 /// This trait has three methods for performing this computation:
 ///
-/// * [`vartime_multiscalar_mul`], which handles the special case
-/// where \\(n = 0\\) and there are no dynamic points;
+/// * [`Self::vartime_multiscalar_mul`], which handles the special case where
+///   \\(n = 0\\) and there are no dynamic points;
 ///
-/// * [`vartime_mixed_multiscalar_mul`], which takes the dynamic
-/// points as already-validated `Point`s and is infallible;
+/// * [`Self::vartime_mixed_multiscalar_mul`], which takes the dynamic points as
+///   already-validated `Point`s and is infallible;
 ///
-/// * [`optional_mixed_multiscalar_mul`], which takes the dynamic
-/// points as `Option<Point>`s and returns an `Option<Point>`,
-/// allowing decompression to be composed into the input iterators.
+/// * [`Self::optional_mixed_multiscalar_mul`], which takes the dynamic points
+///   as `Option<Point>`s and returns an `Option<Point>`, allowing decompression
+///   to be composed into the input iterators.
 ///
 /// All methods require that the lengths of the input iterators be
 /// known, as if they were `ExactSizeIterator`s.  (It does not
@@ -286,7 +307,7 @@ pub trait VartimePrecomputedMultiscalarMul: Sized {
     /// $$
     /// where the \\(B_j\\) are the points that were supplied to `new`.
     ///
-    /// It is valid for \\(b_i)\\ to have a shorter length then \\(B_i)\\.
+    /// It is valid for \\(b_i)\\ to have a shorter length than \\(B_i)\\.
     /// In this case, any "unused" points are ignored in the computation.
     ///
     /// The trait bound aims for maximum flexibility: the input must
@@ -317,9 +338,9 @@ pub trait VartimePrecomputedMultiscalarMul: Sized {
     /// $$
     /// where the \\(B_j\\) are the points that were supplied to `new`.
     ///
-    /// It is valid for \\(b_i)\\ to have a shorter length then \\(B_i)\\.
+    /// It is valid for \\(b_i)\\ to have a shorter length than \\(B_i)\\.
     /// In this case, any "unused" points are ignored in the computation.
-    /// 
+    ///
     /// It is an error to call this function if the iterators \\(a_i)\\
     /// and \\(A_i)\\ do not have equal lengths.
     ///
@@ -361,9 +382,9 @@ pub trait VartimePrecomputedMultiscalarMul: Sized {
     ///
     /// If any of the dynamic points were `None`, return `None`.
     ///
-    /// It is valid for \\(b_i)\\ to have a shorter length then \\(B_i)\\.
+    /// It is valid for \\(b_i)\\ to have a shorter length than \\(B_i)\\.
     /// In this case, any "unused" points are ignored in the computation.
-    /// 
+    ///
     /// It is an error to call this function if the iterators \\(a_i)\\
     /// and \\(A_i)\\ do not have equal lengths.
     ///

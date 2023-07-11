@@ -3,6 +3,47 @@
 Entries are listed in reverse chronological order per undeprecated
 major series.
 
+## 4.x series
+
+### 4.0.0
+
+#### Breaking changes
+
+* Update the MSRV from 1.41 to 1.60
+* Provide SemVer policy
+* Make `digest` an optional feature
+* Make `rand_core` an optional feature
+* Remove `std` feature flag
+* Remove `nightly` feature flag
+* Automatic serial backend selection between `u32` and `u64` over the default `u32`
+* Backend `simd` is now automatically selected over `serial` when a supported CPU is detected
+* Backend override is now via cfg(curve25519_dalek_backend) over additive features
+* Provide override to select `u32` or `u64` backend via cfg(curve25519_dalek_bits)
+* Replace methods `Scalar::{zero, one}` with constants `Scalar::{ZERO, ONE}`
+* Deprecate `EdwardsPoint::hash_from_bytes` and rename it `EdwardsPoint::nonspec_map_to_curve`
+* Require including a new trait, `use curve25519_dalek::traits::BasepointTable`
+  whenever using `EdwardsBasepointTable` or `RistrettoBasepointTable`
+* `Scalar::from_canonical_bytes` now returns `CtOption`
+* `Scalar::is_canonical` now returns `Choice`
+* Remove `Scalar::from_bytes_clamped` and `Scalar::reduce`
+* Deprecate and feature-gate `Scalar::from_bits` behind `legacy_compatibility`
+
+#### Other changes
+
+* Add `EdwardsPoint::{mul_base, mul_base_clamped}`, `MontgomeryPoint::{mul_base, mul_base_clamped}`, and `BasepointTable::mul_base_clamped`
+* Add `precomputed-tables` feature
+* Update Maintenance Policies for SemVer
+* Migrate documentation to docs.rs hosted
+* Fix backend documentation generation
+* Fix panic when `Ristretto::double_and_compress_batch` receives the identity point
+* Remove `byteorder` dependency
+* Update the `criterion` dependency to 0.4.0
+* Include README.md into crate Documentation
+* Update the `rand_core` dependency version and the `rand` dev-dependency
+  version.
+* Relax the `zeroize` dependency to `^1`
+* Update the edition from 2015 to 2021
+
 ## 3.x series
 
 ### 3.2.0
@@ -53,6 +94,8 @@ major series.
 
 ### 3.0.0
 
+#### Breaking changes
+
 * Update the `digest` dependency to `0.9`.  This requires a major version
   because the `digest` traits are part of the public API, but there are
   otherwise no changes to the API.
@@ -80,12 +123,20 @@ major series.
 
 ### 2.0.0
 
+The only significant change is the data model change to the `serde` feature;
+besides the `rand_core` version bump, there are no other user-visible changes.
+
+#### Breaking changes
+
 * Fix a data modeling error in the `serde` feature pointed out by Trevor Perrin
   which caused points and scalars to be serialized with length fields rather
   than as fixed-size 32-byte arrays.  This is a breaking change, but it fixes
   compatibility with `serde-json` and ensures that the `serde-bincode` encoding
   matches the conventional encoding for X/Ed25519.
 * Update `rand_core` to `0.5`, allowing use with new `rand` versions.
+
+#### Other changes
+
 * Switch from `clear_on_drop` to `zeroize` (by Tony Arcieri).
 * Require `subtle = ^2.2.1` and remove the note advising nightly Rust, which is
   no longer required as of that version of `subtle`.  See the `subtle`
@@ -93,9 +144,6 @@ major series.
 * Update `README.md` for `2.x` series.
 * Remove the `build.rs` hack which loaded the entire crate into its own
   `build.rs` to generate constants, and keep the constants in the source code.
-
-The only significant change is the data model change to the `serde` feature;
-besides the `rand_core` version bump, there are no other user-visible changes.
 
 ## 1.x series
 
