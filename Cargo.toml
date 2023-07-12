@@ -5,7 +5,7 @@ name = "tari-curve25519-dalek"
 # - update README if required by semver
 # - if README was updated, also update module documentation in src/lib.rs
 
-version = "4.0.0-tarirc.3"
+version = "4.0.3"
 edition = "2021"
 rust-version = "1.60.0"
 authors = ["Isis Lovecruft <isis@patternsinthevoid.net>",
