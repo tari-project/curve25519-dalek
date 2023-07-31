@@ -34,7 +34,6 @@ pub mod spec {
     use crate::traits::VartimePrecomputedMultiscalarMul;
     use crate::window::{NafLookupTable5, NafLookupTable8};
 
-    #[derive(Clone)]
     pub struct VartimePrecomputedStraus {
         static_lookup_tables: Vec<NafLookupTable8<CachedPoint>>,
     }

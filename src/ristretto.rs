@@ -983,7 +983,6 @@ impl VartimeMultiscalarMul for RistrettoPoint {
 // decouple stability of the inner type from the stability of the
 // outer type.
 #[cfg(feature = "alloc")]
-#[derive(Clone)]
 pub struct VartimeRistrettoPrecomputation(crate::backend::VartimePrecomputedStraus);
 
 #[cfg(feature = "alloc")]

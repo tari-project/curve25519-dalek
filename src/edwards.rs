@@ -830,7 +830,6 @@ impl VartimeMultiscalarMul for EdwardsPoint {
 // decouple stability of the inner type from the stability of the
 // outer type.
 #[cfg(feature = "alloc")]
-#[derive(Clone)]
 pub struct VartimeEdwardsPrecomputation(crate::backend::VartimePrecomputedStraus);
 
 #[cfg(feature = "alloc")]
